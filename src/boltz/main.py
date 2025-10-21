@@ -148,11 +148,11 @@ class Boltz2DiffusionParams:
 class BoltzSteeringParams:
     """Steering parameters."""
 
-    fk_steering: bool = False
+    fk_steering: bool = True
     num_particles: int = 3
     fk_lambda: float = 4.0
     fk_resampling_interval: int = 3
-    physical_guidance_update: bool = False
+    physical_guidance_update: bool = True
     contact_guidance_update: bool = True
     num_gd_steps: int = 20
 
@@ -549,6 +549,7 @@ def process_input(  # noqa: C901, PLR0912, PLR0915, D103
             target = parse_fasta(path, ccd, mol_dir, boltz2)
         elif path.suffix.lower() in (".yml", ".yaml"):
             target = parse_yaml(path, ccd, mol_dir, boltz2)
+            # breakpoint()
         elif path.is_dir():
             msg = f"Found directory {path} instead of .fasta or .yaml, skipping."
             raise RuntimeError(msg)  # noqa: TRY301
@@ -971,6 +972,12 @@ def cli() -> None:
     help="Whether to use potentials for steering. Default is False.",
 )
 @click.option(
+    "--is_allosteric",
+    is_flag=True,
+    help="Whether to use potentials for steering. Default is False.",
+)
+
+@click.option(
     "--model",
     default="boltz2",
     type=click.Choice(["boltz1", "boltz2"]),
@@ -1068,6 +1075,7 @@ def predict(  # noqa: C901, PLR0915, PLR0912
     api_key_header: Optional[str] = None,
     api_key_value: Optional[str] = None,
     use_potentials: bool = False,
+    is_allosteric: bool = False,
     model: Literal["boltz1", "boltz2"] = "boltz2",
     method: Optional[str] = None,
     affinity_mw_correction: Optional[bool] = False,
@@ -1309,6 +1317,7 @@ def predict(  # noqa: C901, PLR0915, PLR0912
         steering_args = BoltzSteeringParams()
         steering_args.fk_steering = use_potentials
         steering_args.physical_guidance_update = use_potentials
+        steering_args.allosteric_steering = is_allosteric
 
         model_cls = Boltz2 if model == "boltz2" else Boltz1
         model_module = model_cls.load_from_checkpoint(

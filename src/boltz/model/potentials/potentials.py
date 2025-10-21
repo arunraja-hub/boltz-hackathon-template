@@ -651,7 +651,124 @@ class TemplateReferencePotential(FlatBottomPotential, ReferencePotential):
         )
 
 
-class ContactPotentital(FlatBottomPotential, DistancePotential):
+class NegativeSteering(FlatBottomPotential, DistancePotential):
+    """
+    Contact potential modified to:
+      - strongly penalize being too close (value < min_distance),
+      - allow a preferred band (min_distance <= value <= max_distance) with zero energy,
+      - weakly penalize being too far (value > max_distance) to avoid drifting away.
+
+    Uses same feat keys as original:
+      - feats["contact_pair_index"]
+      - feats["contact_union_index"] (optional)
+      - feats["contact_negation_mask"] (optional)
+      - feats["contact_thresholds"] (optional fallback for max_distance)
+
+    Parameters (via self.parameters or when constructed):
+      - "min_distance": scalar or tensor (Å). Distances < min_distance => strong repulsion.
+                       If omitted -> no inner exclusion (lower bound = -inf).
+      - "max_distance": scalar or tensor (Å). Distances > max_distance => weak penalty.
+                       If omitted -> uses feats["contact_thresholds"] when available, else +inf.
+      - "k": base slope for inner penalty (default 1.0).
+      - "outer_k_scale": multiplier for outer penalty (default 0.2).
+      - plus existing scheduling parameters like "guidance_interval", "guidance_weight", "resampling_weight", "union_lambda".
+    """
+
+    def compute_args(self, feats, parameters):
+        index = feats["contact_pair_index"][0]
+        union_index = feats["contact_union_index"][0]
+        negation_mask = feats["contact_negation_mask"][0]
+
+        # # fallback thresholds from feats (used only if max_distance not provided)
+        # fallback_thresholds = None
+        # if "contact_thresholds" in feats:
+        #     fallback_thresholds = feats["contact_thresholds"][0].clone()
+
+        device = index.device
+        n_pairs = index.shape[1]
+
+
+        min_dist = parameters["min_distance"]
+        lower_bounds = torch.full((n_pairs,), float("-inf"), device=device)
+
+        max_dist = parameters["max_distance"]
+        upper_bounds = torch.full((n_pairs,), float("inf"), device=device)
+
+        # k and outer scaling
+        k = torch.ones_like(lower_bounds) * float(
+            parameters["k"] if parameters is not None else 1.0
+        )
+        outer_k_scale = float(parameters["outer_k_scale"] if parameters is not None else 0.2)
+
+        # pack args in the same position so compute receives (k, lower, upper, outer_k_scale)
+        args = (k, lower_bounds, upper_bounds, outer_k_scale)
+
+        operator_args = (negation_mask, union_index)
+
+        return index, args, None, None, operator_args
+
+    def compute_function(
+        self,
+        value,
+        k,
+        lower_bounds,
+        upper_bounds,
+        outer_k_scale=0.2,
+        negation_mask=None,
+        compute_derivative=False,
+    ):
+        """
+        Asymmetric flat-bottom:
+          - value < lower_bounds  : E = k * (lower - value)         (strong repulsion)
+          - lower <= value <= upper: E = 0                           (preferred band)
+          - value > upper_bounds   : E = (k * outer_k_scale) * (value - upper)  (weak penalty)
+        Implements same negation handling as original FlatBottomPotential.
+        """
+        if lower_bounds is None:
+            lower_bounds = torch.full_like(value, float("-inf"))
+        if upper_bounds is None:
+            upper_bounds = torch.full_like(value, float("inf"))
+        lower_bounds = lower_bounds.expand_as(value).clone()
+        upper_bounds = upper_bounds.expand_as(value).clone()
+
+        # copy original negation handling so behavior is identical when negation_mask used
+        if negation_mask is not None:
+            unbounded_below_mask = torch.isneginf(lower_bounds)
+            unbounded_above_mask = torch.isposinf(upper_bounds)
+            unbounded_mask = unbounded_below_mask + unbounded_above_mask
+            assert torch.all(unbounded_mask + negation_mask)
+            lower_bounds[~unbounded_above_mask * ~negation_mask] = upper_bounds[
+                ~unbounded_above_mask * ~negation_mask
+            ]
+            upper_bounds[~unbounded_above_mask * ~negation_mask] = float("inf")
+            upper_bounds[~unbounded_below_mask * ~negation_mask] = lower_bounds[
+                ~unbounded_below_mask * ~negation_mask
+            ]
+            lower_bounds[~unbounded_below_mask * ~negation_mask] = float("-inf")
+
+        neg_overflow_mask = value < lower_bounds
+        pos_overflow_mask = value > upper_bounds
+
+        energy = torch.zeros_like(value)
+        # inner (too close): strong linear repulsion
+        energy[neg_overflow_mask] = (k * (lower_bounds - value))[neg_overflow_mask]
+        # outer (too far): weaker linear penalty scaled by outer_k_scale
+        energy[pos_overflow_mask] = (
+            (k * outer_k_scale) * (value - upper_bounds)
+        )[pos_overflow_mask]
+
+        if not compute_derivative:
+            return energy
+
+        dEnergy = torch.zeros_like(value)
+        dEnergy[neg_overflow_mask] = -1 * k.expand_as(value)[neg_overflow_mask]
+        dEnergy[pos_overflow_mask] = (1 * k.expand_as(value) * outer_k_scale)[
+            pos_overflow_mask
+        ]
+
+        return energy, dEnergy
+
+class ContactPotential(FlatBottomPotential, DistancePotential):
     def compute_args(self, feats, parameters):
         index = feats["contact_pair_index"][0]
         union_index = feats["contact_union_index"][0]
@@ -668,7 +785,7 @@ class ContactPotentital(FlatBottomPotential, DistancePotential):
         )
 
 
-def get_potentials(steering_args, boltz2=False):
+def get_potentials(steering_args, boltz2=True):
     potentials = []
     if steering_args["fk_steering"] or steering_args["physical_guidance_update"]:
         potentials.extend(
@@ -756,33 +873,71 @@ def get_potentials(steering_args, boltz2=False):
     if boltz2 and (
         steering_args["fk_steering"] or steering_args["contact_guidance_update"]
     ):
-        potentials.extend(
-            [
-                ContactPotentital(
-                    parameters={
-                        "guidance_interval": 4,
-                        "guidance_weight": (
-                            PiecewiseStepFunction(
-                                thresholds=[0.25, 0.75], values=[0.0, 0.5, 1.0]
-                            )
+
+        if steering_args["is_allosteric"]:
+
+            potentials.extend(
+                [
+
+                    NegativeSteering(
+                            parameters={
+                                "guidance_interval": 4,
+                                "guidance_weight": PiecewiseStepFunction(thresholds=[0.25, 0.75], values=[0.0, 0.5, 1.0]) if steering_args["contact_guidance_update"] else 0.0,
+                                "resampling_weight": 1.0,
+                                "union_lambda": ExponentialInterpolation(start=8.0, end=0.0, alpha=-2.0),
+
+                                # new tuning parameters:
+                                "min_distance": 6.0,      # inside this -> strong repulsion (Å)
+                                "max_distance": 10.0,     # beyond this -> weak penalty (Å)
+                                "k": 1.0,
+                                "outer_k_scale": 0.2,     # outer penalty is 20% of inner slope
+                            }
+                        ),
+
+                                        TemplateReferencePotential(
+                                            parameters={
+                                                "guidance_interval": 2,
+                                                "guidance_weight": 0.1
+                                                if steering_args["contact_guidance_update"]
+                                                else 0.0,
+                                                "resampling_weight": 1.0,
+                                            }
+                                        ),
+                                    ]
+            )
+    
+        elif steerings['is_allosteric'] == False:
+            potentials.extend(
+                [
+                    ContactPotential(
+                        parameters={
+                            "guidance_interval": 4,
+                            "guidance_weight": (
+                                PiecewiseStepFunction(
+                                    thresholds=[0.25, 0.75], values=[0.0, 0.5, 1.0]
+                                )
+                                if steering_args["contact_guidance_update"]
+                                else 0.0
+                            ),
+                            "resampling_weight": 1.0,
+                            "union_lambda": ExponentialInterpolation(
+                                start=8.0, end=0.0, alpha=-2.0
+                            ),
+                        }
+                    ),
+
+                    TemplateReferencePotential(
+                        parameters={
+                            "guidance_interval": 2,
+                            "guidance_weight": 0.1
                             if steering_args["contact_guidance_update"]
-                            else 0.0
-                        ),
-                        "resampling_weight": 1.0,
-                        "union_lambda": ExponentialInterpolation(
-                            start=8.0, end=0.0, alpha=-2.0
-                        ),
-                    }
-                ),
-                TemplateReferencePotential(
-                    parameters={
-                        "guidance_interval": 2,
-                        "guidance_weight": 0.1
-                        if steering_args["contact_guidance_update"]
-                        else 0.0,
-                        "resampling_weight": 1.0,
-                    }
-                ),
-            ]
-        )
+                            else 0.0,
+                            "resampling_weight": 1.0,
+                        }
+                    ),
+                ]
+            )
+
+
+    print('Potentials used:',potentials)
     return potentials

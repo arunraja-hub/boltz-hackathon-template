@@ -45,7 +45,8 @@ def prepare_protein_complex(datapoint_id: str, proteins: List[Protein], input_di
     # will add contact constraints to the input_dict
 
     # Example: predict 5 structures
-    cli_args = ["--diffusion_samples", "5"]
+    cli_args =     ["--diffusion_samples", "1",
+                "--use_potentials", "True"]
     return [(input_dict, cli_args)]
 
 def prepare_protein_ligand(datapoint_id: str, protein: Protein, ligands: list[SmallMolecule], input_dict: dict, msa_dir: Optional[Path] = None) -> List[tuple[dict, List[str]]]:
@@ -77,7 +78,8 @@ def prepare_protein_ligand(datapoint_id: str, protein: Protein, ligands: list[Sm
     # will add contact constraints to the input_dict
 
     # Example: predict 5 structures
-    cli_args = ["--diffusion_samples", "5"]
+    cli_args = ["--diffusion_samples", "1",
+    "--use_potentials"]
     return [(input_dict, cli_args)]
 
 def post_process_protein_complex(datapoint: Datapoint, input_dicts: List[dict[str, Any]], cli_args_list: List[list[str]], prediction_dirs: List[Path]) -> List[Path]:
@@ -232,8 +234,14 @@ def _run_boltz_and_collect(datapoint) -> None:
         # Write input YAML with config index suffix
         yaml_path = input_dir / f"{datapoint.datapoint_id}_config_{config_idx}.yaml"
         with open(yaml_path, "w") as f:
+            # breakpoint()
+            # input_dict["is_allosteric"] = True if datapoint.ground_truth['ligand_types'][0]['type'] == "allosteric" else False
             yaml.safe_dump(input_dict, f, sort_keys=False)
-
+        
+            # breakpoint()
+        
+        is_allosteric  = True if datapoint.ground_truth['ligand_types'][0]['type'] == "allosteric" else False 
+        # print(f"Is allosteric: {is_allosteric}")
         # Run boltz
         cache = os.environ.get("BOLTZ_CACHE", str(Path.home() / ".boltz"))
         fixed = [
@@ -243,9 +251,11 @@ def _run_boltz_and_collect(datapoint) -> None:
             "--cache", cache,
             "--no_kernels",
             "--output_format", "pdb",
+            "--is_allosteric", str(is_allosteric)
         ]
         cmd = fixed + cli_args
         print(f"Running config {config_idx}:", " ".join(cmd), flush=True)
+        breakpoint()
         subprocess.run(cmd, check=True)
 
         # Compute prediction subfolder for this config
@@ -334,6 +344,7 @@ def _process_jsonl(jsonl_path: str, msa_dir: Optional[Path] = None):
 
         try:
             datapoint = Datapoint.from_json(line)
+            # breakpoint()
             _run_boltz_and_collect(datapoint)
 
         except json.JSONDecodeError as e:

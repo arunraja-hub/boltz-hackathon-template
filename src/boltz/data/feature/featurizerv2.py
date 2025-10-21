@@ -2193,7 +2193,7 @@ class Boltz2Featurizer:
         compute_frames: bool = False,
         override_coords: Optional[Tensor] = None,
         bfactor_md_correction: bool = False,
-        compute_constraint_features: bool = False,
+        compute_constraint_features: bool = True,
         inference_pocket_constraints: Optional[
             list[tuple[int, list[tuple[int, int]], float]]
         ] = None,
