@@ -1,3 +1,5 @@
+
+**For the Boltz hackathon submission on the Negative STeering Potential please check https://github.com/arunraja-hub/boltz-hackathon-template/tree/negative_steering **
 <div align="center">
   <div>&nbsp;</div>
   <img src="docs/boltz2_title.png" width="300"/>
