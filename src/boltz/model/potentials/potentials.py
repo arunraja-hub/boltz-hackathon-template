@@ -874,7 +874,10 @@ def get_potentials(steering_args, boltz2=True):
         steering_args["fk_steering"] or steering_args["contact_guidance_update"]
     ):
 
-        if steering_args["is_allosteric"]:
+        breakpoint()
+
+
+        if steering_args["is_allosteric"] == True:
 
             potentials.extend(
                 [
@@ -906,7 +909,7 @@ def get_potentials(steering_args, boltz2=True):
                                     ]
             )
     
-        elif steerings['is_allosteric'] == False:
+        elif steering_args['is_allosteric'] == False:
             potentials.extend(
                 [
                     ContactPotential(

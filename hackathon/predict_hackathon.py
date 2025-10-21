@@ -240,7 +240,7 @@ def _run_boltz_and_collect(datapoint) -> None:
         
             # breakpoint()
         
-        is_allosteric  = True if datapoint.ground_truth['ligand_types'][0]['type'] == "allosteric" else False 
+        is_allosteric  = True if datapoint.datapoint_id.split('_')[1] == 'ALLOSTERIC' else False 
         # print(f"Is allosteric: {is_allosteric}")
         # Run boltz
         cache = os.environ.get("BOLTZ_CACHE", str(Path.home() / ".boltz"))
@@ -255,7 +255,8 @@ def _run_boltz_and_collect(datapoint) -> None:
         ]
         cmd = fixed + cli_args
         print(f"Running config {config_idx}:", " ".join(cmd), flush=True)
-        breakpoint()
+        # breakpoint()
+        
         subprocess.run(cmd, check=True)
 
         # Compute prediction subfolder for this config

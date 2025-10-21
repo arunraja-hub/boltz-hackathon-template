@@ -155,6 +155,7 @@ class BoltzSteeringParams:
     physical_guidance_update: bool = True
     contact_guidance_update: bool = True
     num_gd_steps: int = 20
+    is_allosteric: bool = False
 
 
 @rank_zero_only
@@ -973,7 +974,7 @@ def cli() -> None:
 )
 @click.option(
     "--is_allosteric",
-    is_flag=True,
+    is_flag=False,
     help="Whether to use potentials for steering. Default is False.",
 )
 
