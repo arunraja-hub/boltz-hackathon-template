@@ -870,15 +870,14 @@ def get_potentials(steering_args, boltz2=True):
                 ),
             ]
         )
-    if boltz2 and (
-        steering_args["fk_steering"] or steering_args["contact_guidance_update"]
-    ):
+    if boltz2 and (steering_args["fk_steering"] or steering_args["contact_guidance_update"]):
 
-        breakpoint()
+        # breakpoint()
 
 
-        if steering_args["is_allosteric"] == True:
+        if steering_args["is_allosteric"] == 'True':
 
+            # breakpoint()
             potentials.extend(
                 [
 
@@ -896,8 +895,8 @@ def get_potentials(steering_args, boltz2=True):
                                 "outer_k_scale": 0.2,     # outer penalty is 20% of inner slope
                             }
                         ),
-
-                                        TemplateReferencePotential(
+                    
+                    TemplateReferencePotential(
                                             parameters={
                                                 "guidance_interval": 2,
                                                 "guidance_weight": 0.1
@@ -906,10 +905,11 @@ def get_potentials(steering_args, boltz2=True):
                                                 "resampling_weight": 1.0,
                                             }
                                         ),
-                                    ]
+                ]
             )
     
-        elif steering_args['is_allosteric'] == False:
+        elif steering_args['is_allosteric'] == 'False':
+        # else:
             potentials.extend(
                 [
                     ContactPotential(

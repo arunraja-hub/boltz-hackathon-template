@@ -241,6 +241,7 @@ def _run_boltz_and_collect(datapoint) -> None:
             # breakpoint()
         
         is_allosteric  = True if datapoint.datapoint_id.split('_')[1] == 'ALLOSTERIC' else False 
+        # breakpoint()
         # print(f"Is allosteric: {is_allosteric}")
         # Run boltz
         cache = os.environ.get("BOLTZ_CACHE", str(Path.home() / ".boltz"))
